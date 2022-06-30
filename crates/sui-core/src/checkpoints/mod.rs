@@ -747,6 +747,23 @@ impl CheckpointStore {
         Ok(None)
     }
 
+    pub fn promote_signed_checkpoint_to_cert(
+        &mut self,
+        checkpoint: &CertifiedCheckpointSummary,
+        committee: &Committee,
+    ) -> SuiResult {
+        checkpoint.verify(committee)?;
+        debug_assert!(matches!(
+            self.latest_stored_checkpoint()?,
+            Some(AuthenticatedCheckpoint::Signed(_))
+        ));
+        self.checkpoints.insert(
+            checkpoint.summary.sequence_number(),
+            &AuthenticatedCheckpoint::Certified(checkpoint.clone()),
+        )?;
+        Ok(())
+    }
+
     /// Processes a checkpoint certificate that this validator just learned about.
     /// Such certificate may either be created locally based on a quorum of signed checkpoints,
     /// or downloaded from other validators to sync local checkpoint state.
@@ -765,12 +782,12 @@ impl CheckpointStore {
         // Get the record in our checkpoint database for this sequence number.
         let current = self.checkpoints.get(checkpoint.summary.sequence_number())?;
 
+        // TODO: Remove all cases except None case.
         match &current {
             // If cert exists, do nothing (idempotent)
             Some(AuthenticatedCheckpoint::Certified(_current_cert)) => Ok(false),
-            // If no such checkpoint is known, then return an error
-            // NOTE: a checkpoint must first be confirmed internally before an external
-            // certificate is registered.
+            // If no such checkpoint is known, we will need to have the full contents
+            // to add the new checkpoint cert locally.
             None => {
                 if let &Some(contents) = &contents {
                     // Check and process contents
